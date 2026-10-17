@@ -9,6 +9,8 @@
 
 #define SSD1306_I2C_ADDR 0x3C
 
+using namespace std;
+
 // compile with:
 // g++ -O2 ssd1306.cpp -o oled
 // run with: ./oled
@@ -28,11 +30,13 @@ public:
         fd = open("/dev/i2c-1", O_RDWR);
         if (fd < 0) {
             perror("open");
+	    cout << "Failed to open /dev/i2c-1" << endl; 
             return false;
         }
 
         if (ioctl(fd, I2C_SLAVE, SSD1306_I2C_ADDR) < 0) {
             perror("ioctl");
+	    cout << "error 2" << endl;
             return false;
         }
 
@@ -67,6 +71,7 @@ public:
         return true;
     }
 
+    
     void clear() {
         memset(buffer, 0, sizeof(buffer));
     }
@@ -255,17 +260,21 @@ int main() {
     }
 
     oled.clear();
+      
+   
+    while (1) { 
+	    // will be replaced by dynamic attributes in next version
+	    oled.drawString(10, 1, "Xerxes-07");
+	    oled.drawString(10, 3, "192.168.1.167");
+	  
+	    // ` is shown as degree symbol in display
+	    oled.drawString(10, 5, "55.9`C");
   
-    // will be replaced by dynamic attributes in next version
-    oled.drawString(10, 1, "Xerxes-07");
-    oled.drawString(10, 3, "192.168.1.167");
-  
-    // ` is shown as degree symbol in display
-    oled.drawString(10, 5, "55.9`C");
-  
-    // brackets are shown as arrows in display
-    oled.drawString(10, 7, "[23 ]123 KB/s");
-    oled.display();
+    
+	    // brackets are shown as arrows in display
+		oled.drawString(10, 7, "[23 ]123 KB/s");
+		oled.display();
+    }
 
     return 0;
 }
