@@ -11,4 +11,5 @@
     - To get real information I need to look into some system level funciotns. 
 
 - OLED Customization
+    - Think about this later
 
