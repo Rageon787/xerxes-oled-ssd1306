@@ -2,14 +2,25 @@
 #include <linux/i2c-dev.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
-#include <csignal>
+
 #include <cstring>
 #include <iostream>
 #include <cstdint>
 
-#define SSD1306_I2C_ADDR 0x3C
+// Added for live system info
+#include <arpa/inet.h>   // inet_ntop
+#include <ifaddrs.h>     // getifaddrs
+#include <net/if.h>      // IFF_UP, IFF_LOOPBACK
+#include <netinet/in.h>  // sockaddr_in
+#include <chrono>
+#include <csignal>
+#include <cstdio>        // snprintf
+#include <cstdlib>       // labs
+#include <fstream>
+#include <sstream>
+#include <string>
 
-using namespace std;
+#define SSD1306_I2C_ADDR 0x3C
 
 // compile with:
 // g++ -O2 ssd1306.cpp -o oled
@@ -30,13 +41,11 @@ public:
         fd = open("/dev/i2c-1", O_RDWR);
         if (fd < 0) {
             perror("open");
-	    cout << "Failed to open /dev/i2c-1" << endl; 
             return false;
         }
 
         if (ioctl(fd, I2C_SLAVE, SSD1306_I2C_ADDR) < 0) {
             perror("ioctl");
-	    cout << "error 2" << endl;
             return false;
         }
 
@@ -71,7 +80,6 @@ public:
         return true;
     }
 
-    
     void clear() {
         memset(buffer, 0, sizeof(buffer));
     }
@@ -136,6 +144,11 @@ public:
                 }
             }
         }
+    }
+
+    // Turn the panel off (0xAE). Its RAM keeps the last image.
+    void displayOff() {
+        command(0xAE);
     }
 
 private:
@@ -250,45 +263,190 @@ const uint8_t SSD1306::font[96][5] = {
     {68, 100, 84, 76, 68},  // z (122)
 };
 
-// Main program
+// ===================================================================
+// Live system information (FR-3)
+// Everything below replaces the old "Main program" section.
+// ===================================================================
 
-
+// Set to 0 by the signal handler; the main loop checks it.
 volatile std::sig_atomic_t running = 1;
 
 void handleSignal(int) {
-    running = 0;              // only set the flag here
+    running = 0;   // only set the flag - no drawing or printing in here
 }
 
-int main() {
-    SSD1306 oled;
+// Hostname 
+std::string getHostname() {
+    char buf[256];
+    if (gethostname(buf, sizeof(buf)) != 0)
+        return "unknown";
+    buf[sizeof(buf) - 1] = '\0';   // gethostname may not terminate on truncation
+    return buf;
+}
 
+// IPv4 address 
+// Returns the first IPv4 address on an interface that is up and is not
+// loopback (127.0.0.1). The interface name (e.g. "eth0") is written to
+// ifaceOut so the traffic counters can use the same interface.
+std::string getIPv4(std::string& ifaceOut) {
+    struct ifaddrs* list = nullptr;
+    if (getifaddrs(&list) != 0)
+        return "No IP";
+
+    std::string result = "No IP";
+    ifaceOut.clear();
+
+    for (struct ifaddrs* ifa = list; ifa != nullptr; ifa = ifa->ifa_next) {
+        if (ifa->ifa_addr == nullptr)              continue; // no address
+        if (ifa->ifa_addr->sa_family != AF_INET)   continue; // not IPv4
+        if (!(ifa->ifa_flags & IFF_UP))            continue; // interface down
+        if (ifa->ifa_flags & IFF_LOOPBACK)         continue; // 127.0.0.1
+
+        char ip[INET_ADDRSTRLEN];
+        struct sockaddr_in* sin = reinterpret_cast<struct sockaddr_in*>(ifa->ifa_addr);
+        if (inet_ntop(AF_INET, &sin->sin_addr, ip, sizeof(ip)) != nullptr) {
+            result = ip;
+            ifaceOut = ifa->ifa_name;
+            break;   // take the first match
+        }
+    }
+
+    freeifaddrs(list);   // getifaddrs allocates memory - must free it
+    return result;
+}
+
+// DNS server
+// Returns the first "nameserver" entry in /etc/resolv.conf.
+std::string getDNS() {
+    std::ifstream file("/etc/resolv.conf");
+    if (!file)
+        return "-";
+
+    std::string line;
+    while (std::getline(file, line)) {
+        std::istringstream words(line);
+        std::string key, value;
+        words >> key >> value;
+        if (key == "nameserver" && !value.empty())
+            return value;
+    }
+    return "-";
+}
+
+// CPU temperature 
+// The file holds millidegrees, e.g. 55900 = 55.9 C.
+// The ` character is drawn as a degree symbol by this driver's font.
+std::string getCpuTemp() {
+    std::ifstream file("/sys/class/thermal/thermal_zone0/temp");
+    long milli;
+    if (!(file >> milli))
+        return "--.-`C";
+
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%ld.%ld`C", milli / 1000, std::labs(milli % 1000) / 100);
+    return buf;
+}
+
+//  Network traffic
+// Reads a byte counter such as /sys/class/net/eth0/statistics/rx_bytes.
+// Returns false if the file can't be read (e.g. interface disappeared).
+bool readCounter(const std::string& iface, const char* name, unsigned long long& out) {
+    std::ifstream file("/sys/class/net/" + iface + "/statistics/" + name);
+    return static_cast<bool>(file >> out);
+}
+
+// The counters are running totals since boot, so a rate needs two
+// readings: (bytes now - bytes before) / seconds between them.
+struct TrafficMeter {
+    std::string iface;
+    unsigned long long lastRx = 0, lastTx = 0;
+    std::chrono::steady_clock::time_point lastTime;
+    bool havePrevious = false;
+
+    // Updates rxKBs / txKBs (kilobytes per second). Returns false on the
+    // first call or if the counters can't be read.
+    bool update(const std::string& currentIface, double& rxKBs, double& txKBs) {
+        rxKBs = txKBs = 0.0;
+
+        unsigned long long rx, tx;
+        if (currentIface.empty() ||
+            !readCounter(currentIface, "rx_bytes", rx) ||
+            !readCounter(currentIface, "tx_bytes", tx)) {
+            havePrevious = false;
+            return false;
+        }
+
+        std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+
+        // First reading, or the interface changed: just store a baseline.
+        if (!havePrevious || currentIface != iface) {
+            iface = currentIface;
+            lastRx = rx; lastTx = tx; lastTime = now;
+            havePrevious = true;
+            return false;
+        }
+
+        double seconds = std::chrono::duration<double>(now - lastTime).count();
+        if (seconds > 0.0 && rx >= lastRx && tx >= lastTx) {
+            rxKBs = (rx - lastRx) / 1024.0 / seconds;
+            txKBs = (tx - lastTx) / 1024.0 / seconds;
+        }
+
+        lastRx = rx; lastTx = tx; lastTime = now;
+        return true;
+    }
+};
+
+// --- Drawing helper -------------------------------------------------
+// Draws one line of text at the left edge of a page, cut to 21
+// characters. drawChar() has no bounds check, so a longer string would
+// write past the end of the row (or past the end of the buffer on page 7).
+void drawLine(SSD1306& oled, int page, const std::string& text) {
+    const size_t maxChars = 21;   // 128 px / 6 px per character
+    oled.drawString(0, page, text.substr(0, maxChars).c_str());
+}
+
+// --- Main program ---------------------------------------------------
+int main() {
+    std::signal(SIGINT,  handleSignal);   // Ctrl+C
+    std::signal(SIGTERM, handleSignal);   // kill / systemctl stop
+
+    SSD1306 oled;
     if (!oled.begin()) {
         std::cerr << "Failed to initialize display\n";
         return 1;
     }
 
-    oled.clear();
+    TrafficMeter traffic;
 
-    std::signal(SIGINT,  handleSignal);   // Ctrl+C
-    std::signal(SIGTERM, handleSignal);   // systemctl stop / kill
+    while (running) {
+        std::string iface;
+        std::string hostname = getHostname();
+        std::string ip       = getIPv4(iface);
+        std::string dns      = getDNS();
+        std::string temp     = getCpuTemp();
 
-    while (running) { 
-	    // will be replaced by dynamic attributes in next version
-	    oled.drawString(10, 1, "Xerxes-07");
-	    oled.drawString(10, 3, "192.168.1.167");
-	  
-	    // ` is shown as degree symbol in display
-	    oled.drawString(10, 5, "55.9`C");
-  
-    
-	    // brackets are shown as arrows in display
-		oled.drawString(10, 7, "[23 ]123 KB/s");
-		oled.display();
+        double rxKBs, txKBs;
+        traffic.update(iface, rxKBs, txKBs);
+
+        // [ is drawn as an up arrow (sent), ] as a down arrow (received)
+        char trafficLine[32];
+        snprintf(trafficLine, sizeof(trafficLine), "[%.0f ]%.0f KB/s", txKBs, rxKBs);
+
+        oled.clear();
+        drawLine(oled, 0, hostname);
+        drawLine(oled, 2, "IP  " + ip);
+        drawLine(oled, 3, "DNS " + dns);
+        drawLine(oled, 5, temp);
+        drawLine(oled, 7, trafficLine);
+        oled.display();
+
+        sleep(1);   // returns early if a signal arrives
     }
 
-    oled.clear(); 
+    // Only reached after SIGINT / SIGTERM: leave the screen blank and off.
+    oled.clear();
     oled.display();
-
-
+    oled.displayOff();
     return 0;
 }
