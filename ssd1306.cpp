@@ -2,7 +2,7 @@
 #include <linux/i2c-dev.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
-
+#include <csignal>
 #include <cstring>
 #include <iostream>
 #include <cstdint>
@@ -251,6 +251,14 @@ const uint8_t SSD1306::font[96][5] = {
 };
 
 // Main program
+
+
+volatile std::sig_atomic_t running = 1;
+
+void handleSignal(int) {
+    running = 0;              // only set the flag here
+}
+
 int main() {
     SSD1306 oled;
 
@@ -260,9 +268,11 @@ int main() {
     }
 
     oled.clear();
-      
-   
-    while (1) { 
+
+    std::signal(SIGINT,  handleSignal);   // Ctrl+C
+    std::signal(SIGTERM, handleSignal);   // systemctl stop / kill
+
+    while (running) { 
 	    // will be replaced by dynamic attributes in next version
 	    oled.drawString(10, 1, "Xerxes-07");
 	    oled.drawString(10, 3, "192.168.1.167");
@@ -275,6 +285,10 @@ int main() {
 		oled.drawString(10, 7, "[23 ]123 KB/s");
 		oled.display();
     }
+
+    oled.clear(); 
+    oled.display();
+
 
     return 0;
 }
