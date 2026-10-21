@@ -4,15 +4,17 @@
 // ./oled qr [text]       show a QR code (default text is http://<ip>)
 // add --preview to print the screen in the terminal instead
 
+#include "qrcodegen.hpp"
 #include "ssd1306.h"
 #include "sysinfo.h"
 
-#include <qrencode.h>
 #include <unistd.h>
 
 #include <csignal>
 #include <cstdio>
 #include <string>
+
+using qrcodegen::QrCode;
 
 volatile std::sig_atomic_t running = 1;
 
@@ -31,31 +33,30 @@ void drawQR(SSD1306& oled, std::string text) {
     if (text.empty())
         text = "http://" + getIP();
 
-    QRcode* qr = QRcode_encodeString(text.c_str(), 0, QR_ECLEVEL_L, QR_MODE_8, 1);
-    int scale = qr ? 64 / (qr->width + 2) : 0;
+    QrCode qr = QrCode::encodeText(text.c_str(), QrCode::Ecc::LOW);
+    int size = qr.getSize();
+    int scale = 64 / (size + 2);
     if (scale == 0) {
         oled.drawText(0, 0, "QR text too long");
-        QRcode_free(qr);
         return;
     }
 
     // Scanners need dark squares on a light background, so light up the
     // left 64x64 area and turn off the pixels for the dark squares
-    int offset = (64 - qr->width * scale) / 2;
+    int offset = (64 - size * scale) / 2;
     for (int y = 0; y < 64; y++)
         for (int x = 0; x < 64; x++)
             oled.setPixel(x, y, true);
 
-    for (int y = 0; y < qr->width; y++) {
-        for (int x = 0; x < qr->width; x++) {
-            if (qr->data[y * qr->width + x] & 1) {
+    for (int y = 0; y < size; y++) {
+        for (int x = 0; x < size; x++) {
+            if (qr.getModule(x, y)) {
                 for (int dy = 0; dy < scale; dy++)
                     for (int dx = 0; dx < scale; dx++)
                         oled.setPixel(offset + x * scale + dx, offset + y * scale + dy, false);
             }
         }
     }
-    QRcode_free(qr);
 
     oled.drawText(70, 2, "Scan to");
     oled.drawText(70, 3, "open the");

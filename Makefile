@@ -1,13 +1,10 @@
-# Needs libqrencode: sudo apt install libqrencode-dev
-
 CXX = g++
-CXXFLAGS = -O2 -Wall -std=c++17 $(shell pkg-config --cflags libqrencode)
-LIBS = $(shell pkg-config --libs libqrencode)
+CXXFLAGS = -O2 -Wall -std=c++17
 
-SOURCES = src/main.cpp src/ssd1306.cpp src/sysinfo.cpp
+SOURCES = src/main.cpp src/ssd1306.cpp src/sysinfo.cpp src/qrcodegen.cpp
 
-oled: $(SOURCES) src/ssd1306.h src/sysinfo.h
-	$(CXX) $(CXXFLAGS) $(SOURCES) -o oled $(LIBS)
+oled: $(SOURCES) src/ssd1306.h src/sysinfo.h src/qrcodegen.hpp
+	$(CXX) $(CXXFLAGS) $(SOURCES) -o oled
 
 clean:
 	rm -f oled

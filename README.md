@@ -7,7 +7,7 @@ A lightweight **single-file C++ SSD1306 OLED driver** for Raspberry Pi (I²C) wi
 - Custom icon system (int-based)
 - 90° framebuffer rotation support
 - Simple UI-friendly drawing API
-- QR codes using libqrencode
+- QR codes using [Nayuki's QR Code generator](https://github.com/nayuki/QR-Code-generator) (MIT, included in `src/`)
 
 ---
 
@@ -38,7 +38,6 @@ A lightweight **single-file C++ SSD1306 OLED driver** for Raspberry Pi (I²C) wi
 - I²C enabled
 - SSD1306 128×64 OLED (I²C address typically `0x3C`)
 - g++ compiler
-- libqrencode (`sudo apt install libqrencode-dev`)
 
 ---
 
