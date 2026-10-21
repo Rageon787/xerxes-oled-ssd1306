@@ -3,17 +3,27 @@
 - The information on the screen is hardcoded 
 - No bootup screen for Xerxes pi 
 
-## todos 
-- Fix for display clearing 
-    - give solution for fix 
 
-- Information on the screen is hardcoded. 
-    - To get real information I need to look into some system level funciotns. 
 
-- OLED Customization
-    - Think about this later
 
-- Testing first commit here 
+# C++ Notes
 
+1. Found a way to check which c++ compiler is default:
+
+```
+clang++  -dM  -E  -x c++  /dev/null  |  grep __cplusplus
+``` 
+
+- ``199711L`` -> C++98
+- ``2011102L`` -> C++11
+- ``201402L`` -> C++14
+- ``201703L`` -> C++17
+- ``202002L`` -> C++20
+
+
+# QR Code Notes:
+
+- QR Code levels:
+    -
 
 
