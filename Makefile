@@ -1,24 +1,21 @@
-# Build:    make
-# Install:  sudo make install
-# Remove:   sudo make uninstall
+# Needs libqrencode: sudo apt install libqrencode-dev
 
-CXX      ?= g++
-CXXFLAGS ?= -O2 -Wall -Wextra -std=c++17
-PREFIX   ?= /usr/local
+CXX = g++
+CXXFLAGS = -O2 -Wall -std=c++17 $(shell pkg-config --cflags libqrencode)
+LIBS = $(shell pkg-config --libs libqrencode)
 
-SOURCES = src/main.cpp src/ssd1306.cpp src/qrcode.cpp src/sysinfo.cpp
-HEADERS = src/ssd1306.h src/qrcode.h src/sysinfo.h
+SOURCES = src/main.cpp src/ssd1306.cpp src/sysinfo.cpp
 
-oled: $(SOURCES) $(HEADERS)
-	$(CXX) $(CXXFLAGS) $(SOURCES) -o $@
-
-install: oled
-	install -Dm755 oled $(DESTDIR)$(PREFIX)/bin/xerxes-oled
-
-uninstall:
-	rm -f $(DESTDIR)$(PREFIX)/bin/xerxes-oled
+oled: $(SOURCES) src/ssd1306.h src/sysinfo.h
+	$(CXX) $(CXXFLAGS) $(SOURCES) -o oled $(LIBS)
 
 clean:
 	rm -f oled
 
-.PHONY: install uninstall clean
+install: oled
+	install -Dm755 oled /usr/local/bin/xerxes-oled
+
+uninstall:
+	rm -f /usr/local/bin/xerxes-oled
+
+.PHONY: clean install uninstall

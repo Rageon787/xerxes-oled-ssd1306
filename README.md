@@ -1,84 +1,66 @@
-# Xerxes Pi OLED Driver
+# XerxesPi OLED Driver 
 
-A small C++ driver for the 128x64 SSD1306 OLED on the Xerxes Pi. It shows
-either **live system information** or a **QR code**, and the admin
-software picks which one using command-line options.
+A lightweight **single-file C++ SSD1306 OLED driver** for Raspberry Pi (I²C) with:
 
-No external libraries are needed: only the Linux I2C interface and a C++17
-compiler. The QR code encoder is built in.
+- 128×64 framebuffer
+- Full ASCII 5×7 font
+- Custom icon system (int-based)
+- 90° framebuffer rotation support
+- Simple UI-friendly drawing API
+- QR codes using libqrencode
 
-## Code layout
+---
 
-| File | What it does |
-| --- | --- |
-| `src/main.cpp` | Command-line options, the info and QR screens, the main loop |
-| `src/ssd1306.h/.cpp` | Display driver: framebuffer, text, rectangles, I2C, brightness, flip |
-| `src/qrcode.h/.cpp` | QR code encoder (versions 1-3, error correction L, up to 53 characters) |
-| `src/sysinfo.h/.cpp` | Reads hostname, IP, DNS, CPU temperature, uptime, network speed |
+# Features
 
-## Build and install
+- Direct `/dev/i2c-1` communication
+- SSD1306 initialization sequence (stable on Pi 4)
+- ASCII text rendering (32–127)
+- Custom icon system (arrows, warning, UI symbols)
+- Integer-based icon API (no ASCII dependency)
+- Framebuffer-based rendering (fast + flicker-free)
+- Optional framebuffer rotation (portrait mode support)
 
-Enable I2C first (`sudo raspi-config` → Interface Options → I2C), then:
+# Features added by Ragav
+- QR Code mode to access the admin panel of your XerxesP- View system statistics of your Xerxes Pi.
+- Startup screen 
+
+# Features to be added next:
+- QR Code needs to link to admin panel.
+- Customization options for startup and display options.
+
+---
+
+# Requirements
+
+- Raspberry Pi 4 / Pi 5 (or compatible 3rd party)
+- Raspberry Pi OS (Linux)
+- I²C enabled
+- SSD1306 128×64 OLED (I²C address typically `0x3C`)
+- g++ compiler
+- libqrencode (`sudo apt install libqrencode-dev`)
+
+---
+
+# Instructions
+
+Enable I²C in `raspi-config`
+
+```bash
+sudo raspi-config
+```
+
+Compile with Makefiles:
 
 ```bash
 make
-sudo make install        # installs /usr/local/bin/xerxes-oled
+./oled                  # system info
+./oled qr               # QR code for http://<ip>
+./oled qr http://example.com
+./oled --preview        # print the screen in the terminal (no OLED needed)
+sudo make install       # installs /usr/local/bin/xerxes-oled
 ```
 
-## Usage
 
-```bash
-# Live system information (the default)
-xerxes-oled
 
-# Choose which lines to show, and add a custom message at the bottom
-xerxes-oled --fields hostname,ip,temp --message "Rack 2 / Slot 4"
 
-# QR code pointing at the admin panel. {ip} and {hostname} are filled in.
-xerxes-oled --mode qr --qr-text "http://{ip}:8080" --qr-caption "Scan to open admin panel"
-
-# Dimmer, upside down (for boards mounted the other way)
-xerxes-oled --brightness 30 --flip
-```
-
-Run `xerxes-oled --help` for every option. Ctrl+C (or `systemctl stop`)
-clears and turns off the screen.
-
-### Testing without a screen
-
-`--preview` draws the screen in the terminal instead of on the OLED, so
-you can work on layouts on any machine (including macOS). `--once` draws a
-single frame and exits.
-
-```bash
-./oled --preview --mode qr --qr-text "http://192.168.1.10:8080" --once
-```
-
-### Running at boot
-
-Create `/etc/systemd/system/xerxes-oled.service`:
-
-```ini
-[Unit]
-Description=Xerxes Pi OLED display
-
-[Service]
-ExecStart=/usr/local/bin/xerxes-oled --mode info
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Then `sudo systemctl enable --now xerxes-oled`. To change what is shown,
-the admin software edits `ExecStart` (or uses a drop-in override) and
-restarts the service.
-
-## Notes
-
-- The font only covers ASCII. Four symbols are redrawn as icons:
-  `[` up arrow, `]` down arrow, `^` warning, `` ` `` degree sign.
-- QR codes are drawn as dark modules on a lit square, because scanners
-  expect dark-on-light.
-- The QR encoder was checked module by module against the Python
-  `qrcode` library for all 8 masks and versions 1-3.

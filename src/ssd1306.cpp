@@ -8,15 +8,11 @@
 #include <cstring>
 
 #ifdef __linux__
-#include <linux/i2c-dev.h>   // I2C_SLAVE
+#include <linux/i2c-dev.h>
 #endif
 
-namespace {
-
-// 5x7 font for ASCII 32-127. Each glyph is 5 column bytes, bit 0 = top row.
-// A few unused symbols are redrawn as icons:
-//   [ = up arrow   ] = down arrow   ^ = warning   ` = degree sign
-const uint8_t FONT[96][5] = {
+// 5x7 font (ASCII 32-127)
+static const uint8_t font[96][5] = {
     {0,0,0,0,0},                 // space
     {0,0,95,0,0},                // !
     {0,7,0,7,0},                 // "
@@ -80,12 +76,12 @@ const uint8_t FONT[96][5] = {
     {7,8,112,8,7},               // Y
     {97,81,73,69,67},            // Z (90)
 
-    {4,2,31,2,4},      // [ bracket replaced by up arrow
-    {0,0,0,0,0},       // backslash
-    {4,8,31,8,4},      // ] bracket replaced by down arrow
-    {28,54,54,28,28},  // ^ replaced by warning
-    {0,0,0,0,0},       // _
-    {6,9,9,6,0},       // ` replaced by degree symbol
+    {0,127,65,65,0},   // [
+    {2,4,8,16,32},     // backslash
+    {0,65,65,127,0},   // ]
+    {4,2,1,2,4},       // ^
+    {64,64,64,64,64},  // _
+    {6,9,9,6,0},       // ` (drawn as a degree sign)
 
     {0, 32, 84, 84, 120},   // a (97)
     {127, 72, 68, 68, 56},  // b
@@ -115,49 +111,41 @@ const uint8_t FONT[96][5] = {
     {68, 100, 84, 76, 68},  // z (122)
 };
 
-// The first byte of every I2C write tells the SSD1306 what follows.
-const uint8_t CONTROL_COMMAND = 0x00;
-const uint8_t CONTROL_DATA    = 0x40;
-
-} // namespace
-
 SSD1306::~SSD1306() {
     if (fd >= 0)
         close(fd);
 }
 
-bool SSD1306::begin(const std::string& device, int address) {
+bool SSD1306::begin(const char* device, int address) {
 #ifdef __linux__
-    fd = open(device.c_str(), O_RDWR);
-    if (fd < 0) {
-        perror(device.c_str());
+    fd = open(device, O_RDWR);
+    if (fd < 0)
         return false;
-    }
 
     if (ioctl(fd, I2C_SLAVE, address) < 0) {
-        perror("ioctl(I2C_SLAVE)");
         close(fd);
         fd = -1;
         return false;
     }
 
+    // Standard init sequence for 128x64 panels
     const uint8_t init[] = {
-        0xAE,         // display off while we configure it
-        0x20, 0x00,   // horizontal addressing mode
-        0x40,         // start at RAM line 0
-        0xA1,         // segment remap: column 127 is on the left
-        0xC8,         // COM scan direction: bottom to top
-        0x81, 0x7F,   // contrast (brightness)
-        0xA6,         // normal (not inverted) pixels
-        0xA8, 0x3F,   // multiplex ratio: 64 rows
-        0xA4,         // show RAM contents
-        0xD3, 0x00,   // no vertical offset
-        0xD5, 0x80,   // clock divide ratio / oscillator frequency
-        0xD9, 0xF1,   // pre-charge period
-        0xDA, 0x12,   // COM pin layout for 128x64 panels
-        0xDB, 0x40,   // VCOMH deselect level
-        0x8D, 0x14,   // enable the internal charge pump
-        0xAF          // display on
+        0xAE,        // display off
+        0x20, 0x00,  // horizontal addressing
+        0x40,        // start line 0
+        0xA1,        // segment remap
+        0xC8,        // COM scan direction
+        0x81, 0x7F,  // contrast
+        0xA6,        // normal display
+        0xA8, 0x3F,  // multiplex 64
+        0xA4,        // show RAM
+        0xD3, 0x00,  // no offset
+        0xD5, 0x80,  // clock
+        0xD9, 0xF1,  // pre-charge
+        0xDA, 0x12,  // COM pins
+        0xDB, 0x40,  // VCOMH
+        0x8D, 0x14,  // charge pump on
+        0xAF         // display on
     };
     for (uint8_t c : init)
         command(c);
@@ -168,7 +156,6 @@ bool SSD1306::begin(const std::string& device, int address) {
 #else
     (void)device;
     (void)address;
-    fprintf(stderr, "I2C is only supported on Linux. Use --preview instead.\n");
     return false;
 #endif
 }
@@ -177,54 +164,30 @@ void SSD1306::display() {
     if (fd < 0)
         return;
 
-    // Send one page (8 rows) at a time.
-    for (int page = 0; page < HEIGHT / 8; page++) {
-        command(0xB0 + page);   // select page
-        command(0x00);          // column 0 (low nibble)
-        command(0x10);          // column 0 (high nibble)
+    for (int page = 0; page < 8; page++) {
+        command(0xB0 + page);
+        command(0x00);
+        command(0x10);
 
         uint8_t data[1 + WIDTH];
-        data[0] = CONTROL_DATA;
+        data[0] = 0x40;  // 0x40 = data follows
         memcpy(&data[1], &buffer[page * WIDTH], WIDTH);
-        if (write(fd, data, sizeof(data)) < 0)
-            perror("write");
+        write(fd, data, sizeof(data));
     }
 }
 
-void SSD1306::printToTerminal() const {
-    // Each terminal character shows two pixel rows using half-block
-    // characters, so the 128x64 screen fits in 128x32 characters.
-    std::string out = "+" + std::string(WIDTH, '-') + "+\n";
-    for (int y = 0; y < HEIGHT; y += 2) {
-        out += "|";
-        for (int x = 0; x < WIDTH; x++) {
-            bool top = getPixel(x, y);
-            bool bottom = getPixel(x, y + 1);
-            if (top && bottom) out += "█";   // full block
-            else if (top)      out += "▀";   // upper half
-            else if (bottom)   out += "▄";   // lower half
-            else               out += " ";
-        }
-        out += "|\n";
-    }
-    out += "+" + std::string(WIDTH, '-') + "+\n";
-    fputs(out.c_str(), stdout);
-    fflush(stdout);
-}
-
-void SSD1306::setBrightness(uint8_t level) {
-    command(0x81);
-    command(level);
-}
-
-void SSD1306::setFlipped(bool flipped) {
-    // Rotating 180 degrees = mirror horizontally and vertically.
-    command(flipped ? 0xA0 : 0xA1);   // segment remap
-    command(flipped ? 0xC0 : 0xC8);   // COM scan direction
-}
-
-void SSD1306::powerOff() {
+void SSD1306::off() {
     command(0xAE);
+}
+
+void SSD1306::printToTerminal() {
+    for (int y = 0; y < HEIGHT; y++) {
+        for (int x = 0; x < WIDTH; x++) {
+            bool on = buffer[x + (y / 8) * WIDTH] & (1 << (y % 8));
+            printf(on ? "#" : " ");
+        }
+        printf("\n");
+    }
 }
 
 void SSD1306::clear() {
@@ -233,57 +196,30 @@ void SSD1306::clear() {
 
 void SSD1306::setPixel(int x, int y, bool on) {
     if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT)
-        return;   // clip: never write outside the buffer
+        return;
 
-    uint8_t& byte = buffer[x + (y / 8) * WIDTH];
-    uint8_t mask = 1 << (y % 8);
     if (on)
-        byte |= mask;
+        buffer[x + (y / 8) * WIDTH] |= (1 << (y % 8));
     else
-        byte &= ~mask;
+        buffer[x + (y / 8) * WIDTH] &= ~(1 << (y % 8));
 }
 
-bool SSD1306::getPixel(int x, int y) const {
-    if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT)
-        return false;
-    return buffer[x + (y / 8) * WIDTH] & (1 << (y % 8));
-}
-
-void SSD1306::fillRect(int x, int y, int w, int h, bool on) {
-    for (int dy = 0; dy < h; dy++)
-        for (int dx = 0; dx < w; dx++)
-            setPixel(x + dx, y + dy, on);
-}
-
-void SSD1306::drawHLine(int x, int y, int w) {
-    fillRect(x, y, w, 1, true);
-}
-
-void SSD1306::drawText(int x, int y, const std::string& text, int scale, bool on) {
+// Each character is 5 columns plus 1 blank column
+void SSD1306::drawText(int x, int page, const std::string& text) {
     for (char c : text) {
-        drawChar(x, y, c, scale, on);
-        x += CHAR_WIDTH * scale;
-    }
-}
-
-void SSD1306::drawChar(int x, int y, char c, int scale, bool on) {
-    if (c < 32 || c > 127)
-        c = '?';
-
-    const uint8_t* glyph = FONT[c - 32];
-    for (int col = 0; col < 5; col++) {
-        for (int row = 0; row < 7; row++) {
-            if (glyph[col] & (1 << row))
-                fillRect(x + col * scale, y + row * scale, scale, scale, on);
+        if (c < 32 || c > 127)
+            c = '?';
+        for (int col = 0; col < 5; col++) {
+            if (x + col < WIDTH && page < 8)
+                buffer[page * WIDTH + x + col] = font[c - 32][col];
         }
+        x += 6;
     }
 }
 
 void SSD1306::command(uint8_t cmd) {
     if (fd < 0)
         return;
-
-    uint8_t buf[2] = {CONTROL_COMMAND, cmd};
-    if (write(fd, buf, sizeof(buf)) < 0)
-        perror("write");
+    uint8_t buf[2] = {0x00, cmd};  // 0x00 = command follows
+    write(fd, buf, 2);
 }
