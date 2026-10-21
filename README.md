@@ -21,6 +21,14 @@ A lightweight **single-file C++ SSD1306 OLED driver** for Raspberry Pi (I²C) wi
 - Framebuffer-based rendering (fast + flicker-free)
 - Optional framebuffer rotation (portrait mode support)
 
+# Features added by Ragav
+- QR Code mode to access the admin panel of your XerxesP- View system statistics of your Xerxes Pi.
+- Startup screen 
+
+# Features to be added next:
+- QR Code needs to link to admin panel.
+- Customization options for startup and display options.
+
 ---
 
 # Requirements
@@ -41,11 +49,11 @@ Enable I²C in `raspi-config`
 sudo raspi-config
 ```
 
-Compile with g++
+Compile with Makefiles:
 
-```bash
-g++ -O2 ssd1306.cpp -o ssd1306
-```
+<!-- TODO: add wiring diagram for the OLED -->
+
+
 
 ---
 
